@@ -16,8 +16,6 @@ import MeshPart
 
 def export_obj():
     try:
-        App.Console.PrintMessage("Starting export to Blender...\n")
-
         doc = App.activeDocument()
         if not doc:
             raise RuntimeError("No active document to export")
@@ -44,9 +42,9 @@ def export_obj():
 
         if meshes:
             # Use a custom directory to retain the file
-            custom_dir = "/tmp/FreeCAD-LiveLink"
-            os.makedirs(custom_dir, exist_ok=True)
-            object_path = os.path.join(custom_dir, f"{doc.Name}.obj")
+            temp_dir = TemporaryDirectory()
+            os.makedirs(temp_dir.name, exist_ok=True)
+            object_path = os.path.join(temp_dir.name, f"{doc.Name}.obj")
             Mesh.export(meshes, object_path)
 
             # Send the exported mesh path to Blender
@@ -55,11 +53,11 @@ def export_obj():
             client_socket.connect(server_address)
             client_socket.sendall(object_path.encode())
 
-            App.Console.PrintMessage("Waiting for Blender response...\n")
             status_message = client_socket.recv(1024).decode()
             App.Console.PrintMessage(f"Blender: {status_message}\n")
 
-            App.Console.PrintMessage(f"Temporary file retained at: {object_path}\n")
+            client_socket.close()
+            temp_dir.cleanup()
         else:
             raise RuntimeError("No objects to export")
 
@@ -67,8 +65,6 @@ def export_obj():
         App.closeDocument('meshes_to_export')
         for x in selection:
             Gui.Selection.addSelection(doc.Name, x.ObjectName)
-
-    App.Console.PrintMessage("Export completed successfully.\n")
 
 def testFunction():
     App.Console.PrintMessage("Test function called from Blender Live Link.\n")
