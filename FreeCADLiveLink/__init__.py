@@ -17,14 +17,17 @@ obj_path = None
 import_status = None
 
 def import_obj():
-    global obj_path
-    bpy.ops.wm.obj_import(filepath=obj_path, forward_axis='Y', up_axis='Z')
+    try:
+        global obj_path
+        bpy.ops.wm.obj_import(filepath=obj_path, forward_axis='Y', up_axis='Z')
 
-    for obj in bpy.data.objects:
-        if obj.select_get() == True:
-            obj.scale = (0.01, 0.01, 0.01)
+        for obj in bpy.data.objects:
+            if obj.select_get() == True:
+                obj.scale = (0.01, 0.01, 0.01)
 
-    bpy.ops.object.transform_apply(scale=True)
+        bpy.ops.object.transform_apply(scale=True)
+    except Exception as e:
+        obj_path = None
 
 def obj_data_monitor():
     global obj_path
