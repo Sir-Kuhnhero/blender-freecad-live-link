@@ -1,6 +1,6 @@
 #!/bin/bash
 
-FREECAD_ADDONS_DIRECTORY="$HOME/.local/share/FreeCAD/v1-1/Mod"
+FREECAD_ADDONS_DIRECTORY="$HOME/.local/share/FreeCAD/v1-2/Mod"
 BLENDER_ADDONS_DIRECTORY="$HOME/.var/app/org.blender.Blender/config/blender/5.0/scripts/addons"
 
 if [ -d "$FREECAD_ADDONS_DIRECTORY" ]; then
