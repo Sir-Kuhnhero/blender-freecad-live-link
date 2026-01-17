@@ -62,8 +62,23 @@ def import_obj():
                         if existing_obj:
                             # Sync: Replace the existing object's mesh data
                             old_mesh = existing_obj.data
-                            existing_obj.data = imported_objects[i].data
+                            new_mesh = imported_objects[i].data
+                            
+                            # Store existing materials
+                            old_materials = [slot.material for slot in existing_obj.material_slots]
+                            
+                            # Replace mesh data
+                            existing_obj.data = new_mesh
                             existing_obj.name = new_name
+                            
+                            # Restore materials to the updated mesh
+                            if old_materials:
+                                for i, mat in enumerate(old_materials):
+                                    if i < len(existing_obj.material_slots):
+                                        existing_obj.material_slots[i].material = mat
+                                    else:
+                                        # Add new material slot if needed
+                                        existing_obj.data.materials.append(mat)
                             
                             # Remove the temporary imported object
                             bpy.data.objects.remove(imported_objects[i], do_unlink=True)
