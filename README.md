@@ -20,4 +20,9 @@ Once you have installed the scripts, open a model in FreeCAD and also keep Blend
 
 ## Notes
 
-_Software Versions: FreeCAD 0.20.2 and Blender 3.3 LTS (3.3.7). Kindly use these versions if you face any issues._
+This is a forke with the following improvements (WIP)
+
+1. Support for FreeCAD v1.0 to v1.2. I am runnign the newest dev build of 1.2 so that is what I recomend.
+2. Seperate Export and Sync options.
+    - Export works like the original addon by creating a body of the currently selected FreeCAD body in blender
+    - Sync is a new operation that also creates a bodie of the in FreeCAD selected bodies. However it also checks if the body have already been created in blender. If yes then it simply updates the mesh to reflect the changes made in FreeCAD. It does not chage Position and Modifyers though currently it changes the material back to the default.  
