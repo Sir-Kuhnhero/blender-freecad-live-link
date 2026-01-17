@@ -16,3 +16,6 @@ if [ -d "$BLENDER_ADDONS_DIRECTORY" ]; then
 else
     echo "Blender addons directory not found. Skipping Blender addon installation."
 fi
+
+echo "Launching Blender..."
+flatpak run org.blender.Blender

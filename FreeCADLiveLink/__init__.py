@@ -14,29 +14,86 @@ bl_info = {
 }
 
 obj_path = None
+object_data = None
 import_status = None
+is_sync_mode = False
+
+def find_object_by_name(name):
+    """Find an existing object in Blender by its name in parentheses"""
+    for obj in bpy.data.objects:
+        # Check if object name has the format name(name)
+        if '(' in obj.name and ')' in obj.name:
+            # Extract the name from parentheses
+            start = obj.name.find('(')
+            end = obj.name.find(')')
+            existing_name = obj.name[start+1:end]
+            if existing_name == name:
+                return obj
+    return None
 
 def import_obj():
     try:
         global obj_path
+        global is_sync_mode
+        
+        # Import the OBJ file
         bpy.ops.wm.obj_import(filepath=obj_path, forward_axis='Y', up_axis='Z')
 
-        for obj in bpy.data.objects:
-            if obj.select_get() == True:
-                obj.scale = (0.01, 0.01, 0.01)
-
+        # Get the newly imported objects (they are selected after import)
+        imported_objects = [obj for obj in bpy.data.objects if obj.select_get() == True]
+        
+        # Apply scale to all imported objects
+        for obj in imported_objects:
+            obj.scale = (0.01, 0.01, 0.01)
+        
         bpy.ops.object.transform_apply(scale=True)
+        
+        if is_sync_mode:
+            # SYNC MODE: Use name(label) format and update existing objects
+            if object_data:
+                for i, obj_info in enumerate(object_data):
+                    if i < len(imported_objects):
+                        name, label = obj_info
+                        new_name = f"{label}({name})"
+                        
+                        # Check if an object with this label already exists
+                        existing_obj = find_object_by_name(name)
+                        
+                        if existing_obj:
+                            # Sync: Replace the existing object's mesh data
+                            old_mesh = existing_obj.data
+                            existing_obj.data = imported_objects[i].data
+                            existing_obj.name = new_name
+                            
+                            # Remove the temporary imported object
+                            bpy.data.objects.remove(imported_objects[i], do_unlink=True)
+                            
+                            # Clean up the old mesh
+                            if old_mesh.users == 0:
+                                bpy.data.meshes.remove(old_mesh)
+                        else:
+                            # New object in sync mode: use name(label) format
+                            imported_objects[i].name = new_name
+        else:
+            # EXPORT MODE: Use only label as name (makes them not sync targets)
+            if object_data:
+                for i, label in enumerate(object_data):
+                    if i < len(imported_objects):
+                        imported_objects[i].name = label
+                        
     except Exception as e:
-        obj_path = None
+        print(f"Import error: {e}")
 
 def obj_data_monitor():
     global obj_path
+    global object_data
     global import_status
 
     if obj_path != None:
         try:
             import_obj()
             obj_path = None
+            object_data = None
             import_status = 'SUCCESS'    
         except Exception as e:
             print(str(e))
@@ -45,7 +102,9 @@ def obj_data_monitor():
 
 def receive_data():
     global obj_path
+    global object_data
     global import_status
+    global is_sync_mode
 
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_address = ('localhost', 25000)
@@ -59,15 +118,40 @@ def receive_data():
         print("Connected with FreeCAD instance:", client_address)
 
         data = connection.recv(1024).decode()
+        print(f"Received data: {data}")
 
-        if data == "Quit Blender!":
-            print("FreeCAD Live Link: Shutting down...")
-            server_socket.close()
-            break
-
-        print(f"OBJ received: {data}")
+        # Parse the data format
+        # SYNC format: OBJ_PATH|{name1,label1},{name2,label2},...
+        # EXPORT format: OBJ_PATH|label1,label2,...
+        if '|' in data:
+            parts = data.split('|', 1)
+            obj_path = parts[0]
+            
+            # Parse object data
+            if len(parts) > 1 and parts[1]:
+                # Check if it's sync mode (contains braces) or export mode (plain labels)
+                if '{' in parts[1]:
+                    # SYNC MODE: Parse {name,label} pairs
+                    is_sync_mode = True
+                    object_data = []
+                    import re
+                    matches = re.findall(r'\{([^,]+),([^}]+)\}', parts[1])
+                    for name, label in matches:
+                        object_data.append((name, label))
+                else:
+                    # EXPORT MODE: Parse plain comma-separated labels
+                    is_sync_mode = False
+                    object_data = [label.strip() for label in parts[1].split(',') if label.strip()]
+            else:
+                is_sync_mode = False
+                object_data = []
+        else:
+            # Fallback for old format (just path)
+            obj_path = data
+            object_data = []
+            is_sync_mode = False
+        
         import_status = 'IMPORTING'
-        obj_path = data
 
         while import_status != None:
             if import_status == 'SUCCESS':

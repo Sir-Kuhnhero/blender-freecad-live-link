@@ -14,7 +14,8 @@ import Mesh
 import MeshPart
 
 
-def export_obj():
+def export_to_blender():
+    """Export objects to Blender as new bodies (using only label as name)"""
     try:
         doc = App.activeDocument()
         if not doc:
@@ -23,40 +24,21 @@ def export_obj():
         selection = Gui.Selection.getSelectionEx()
         objects_to_export = [x.Object for x in selection] or [doc.ActiveObject]
 
-        # Create temporary document to store meshes
-        tmp_doc = App.newDocument('meshes_to_export', temp=True)
-        meshes = []
-        mesh_names = []
-        angular_deflection = 0.07  # Default angular deflection
-
-        for o in objects_to_export:
-            if o.TypeId == 'Mesh::Feature':
-                meshes.append(o)
-            else:
-                mesh = tmp_doc.addObject('Mesh::Feature', f'{doc.Label}_{o.Label}')
-                mesh.Mesh = MeshPart.meshFromShape(
-                    o.Shape, LinearDeflection=0.1, AngularDeflection=angular_deflection, Relative=False
-                )
-                meshes.append(mesh)
-                mesh_names.append(o.Label)
+        meshes, mesh_data = create_meshes(doc, objects_to_export)
 
         if meshes:
-            # Use a custom directory to retain the file
-            temp_dir = TemporaryDirectory()
-            os.makedirs(temp_dir.name, exist_ok=True)
-            object_path = os.path.join(temp_dir.name, f"{doc.Name}.obj")
-            Mesh.export(meshes, object_path)
+            object_path, temp_dir = export_mesh(doc, meshes)
 
-            # Send the exported mesh path to Blender
-            server_address = ('localhost', 25000)
-            client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            client_socket.connect(server_address)
-            client_socket.sendall(object_path.encode())
+            # create message -> Format: OBJ_PATH|label1,label2,...
+            object_data = []
+            for name, label in mesh_data:
+                object_data.append(label)
+           
+            data = ','.join(object_data) if object_data else ''
+            message = f"{object_path}|{data}"
+           
+            send_message_to_blender(message)
 
-            status_message = client_socket.recv(1024).decode()
-            App.Console.PrintMessage(f"Blender: {status_message}\n")
-
-            client_socket.close()
             temp_dir.cleanup()
         else:
             raise RuntimeError("No objects to export")
@@ -66,16 +48,91 @@ def export_obj():
         for x in selection:
             Gui.Selection.addSelection(doc.Name, x.ObjectName)
 
-def testFunction():
-    App.Console.PrintMessage("Test function called from Blender Live Link.\n")
+def sync_to_blender():
+    """Sync objects to Blender (update existing bodies or create with name(label) format)"""
+    try:
+        doc = App.activeDocument()
+        if not doc:
+            raise RuntimeError("No active document to sync")
+    
+        selection = Gui.Selection.getSelectionEx()
+        objects_to_export = [x.Object for x in selection] or [doc.ActiveObject]
+
+        meshes, mesh_data = create_meshes(doc, objects_to_export)
+
+        if meshes:
+            # Use a custom directory to retain the file
+            object_path, temp_dir = export_mesh(doc, meshes)
+
+            # create message -> Format: OBJ_PATH|{name1,label1},{name2,label2},...
+            object_data = []
+            for name, label in mesh_data:
+                object_data.append(f"{{{name},{label}}}")
+
+            data = ','.join(object_data) if object_data else ''
+            message = f"{object_path}|{data}"
+           
+            send_message_to_blender(message)
+
+            temp_dir.cleanup()
+        else:
+            raise RuntimeError("No objects to sync")
+
+    finally:
+        App.closeDocument('meshes_to_export')
+        for x in selection:
+            Gui.Selection.addSelection(doc.Name, x.ObjectName)
+
+def create_meshes(doc, objects_to_export):
+    # Create temporary document to store meshes
+    tmp_doc = App.newDocument('meshes_to_export', temp=True)
+    meshes = []
+    mesh_data = []
+    angular_deflection = 0.07  # Default angular deflection
+
+    for o in objects_to_export:
+        if o.TypeId == 'Mesh::Feature':
+            meshes.append(o)
+            mesh_data.append((o.Name, o.Label))
+        else:
+            mesh = tmp_doc.addObject('Mesh::Feature', f'{doc.Name}_{o.Name}')
+            mesh.Mesh = MeshPart.meshFromShape(
+                o.Shape, LinearDeflection=0.1, AngularDeflection=angular_deflection, Relative=False
+            )
+            meshes.append(mesh)
+            mesh_data.append((o.Name, o.Label))
+
+    return meshes, mesh_data
+
+def export_mesh(doc, meshes):
+    temp_dir = TemporaryDirectory()
+    os.makedirs(temp_dir.name, exist_ok=True)
+    object_path = os.path.join(temp_dir.name, f"{doc.Name}.obj")
+    Mesh.export(meshes, object_path)
+
+    return object_path, temp_dir
+
+def send_message_to_blender(message):
+    """Send a message to Blender via socket and return the response"""
+    server_address = ('localhost', 25000)
+    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    client_socket.connect(server_address)
+    client_socket.sendall(message.encode())
+
+    status_message = client_socket.recv(1024).decode()
+    client_socket.close()
+    return status_message
 
 def create_menu():
     menu = QtWidgets.QMenu("Blender")
 
-    action = QAction("Export to Blender", menu)
-    action.triggered.connect(export_obj)
+    actionExport = QAction("Export to Blender", menu)
+    actionExport.triggered.connect(export_to_blender)
+    menu.addAction(actionExport)
 
-    menu.addAction(action)
+    actionSync = QAction("Sync to Blender", menu)
+    actionSync.triggered.connect(sync_to_blender)
+    menu.addAction(actionSync)
 
     main_menu = Gui.getMainWindow().menuBar()
     main_menu.addMenu(menu)
