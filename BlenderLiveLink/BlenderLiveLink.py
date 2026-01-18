@@ -1,5 +1,6 @@
 import sys
 import os
+import json
 
 import socket
 from PySide6 import QtWidgets
@@ -22,21 +23,27 @@ def export_to_blender():
             raise RuntimeError("No active document to export")
 
         selection = Gui.Selection.getSelectionEx()
-        objects_to_export = [x.Object for x in selection] or [doc.ActiveObject]
+        objects_to_export = get_all_objects_to_export(doc, selection)
+
+
+        if not objects_to_export:
+            raise RuntimeError("No objects selected to export")
 
         meshes, mesh_data = create_meshes(doc, objects_to_export)
 
         if meshes:
             object_path, temp_dir = export_mesh(doc, meshes)
 
-            # create message -> Format: OBJ_PATH|label1,label2,...
-            object_data = []
-            for name, label in mesh_data:
-                object_data.append(label)
+            # create message as JSON
+            message_data = {
+                "method": "export",
+                "path": object_path,
+                "objects": [{"name": name, "label": label} for name, label in mesh_data]
+            }
+            message = json.dumps(message_data)
            
-            data = ','.join(object_data) if object_data else ''
-            message = f"{object_path}|{data}"
-           
+            App.Console.PrintMessage(f"Sending to Blender: {message}\n")
+
             send_message_to_blender(message)
 
             temp_dir.cleanup()
@@ -58,20 +65,24 @@ def sync_to_blender():
         selection = Gui.Selection.getSelectionEx()
         objects_to_export = [x.Object for x in selection] or [doc.ActiveObject]
 
+        if not objects_to_export:
+            raise RuntimeError("No objects selected to sync")
+
         meshes, mesh_data = create_meshes(doc, objects_to_export)
 
         if meshes:
             # Use a custom directory to retain the file
             object_path, temp_dir = export_mesh(doc, meshes)
 
-            # create message -> Format: OBJ_PATH|{name1,label1},{name2,label2},...
-            object_data = []
-            for name, label in mesh_data:
-                object_data.append(f"{{{name},{label}}}")
-
-            data = ','.join(object_data) if object_data else ''
-            message = f"{object_path}|{data}"
+            # create message as JSON
+            message_data = {
+                "method": "sync",
+                "path": object_path,
+                "objects": [{"name": name, "label": label} for name, label in mesh_data]
+            }
+            message = json.dumps(message_data)
            
+            App.Console.PrintMessage(f"Sending to Blender: {message}\n")
             send_message_to_blender(message)
 
             temp_dir.cleanup()
@@ -82,6 +93,17 @@ def sync_to_blender():
         App.closeDocument('meshes_to_export')
         for x in selection:
             Gui.Selection.addSelection(doc.Name, x.ObjectName)
+
+
+def get_all_objects_to_export(doc, selection):
+    """Get all objects to export from the current selection or document"""
+    if not selection:
+        return None
+
+    objects_to_export = [x.Object for x in selection] or [doc.ActiveObject]
+    
+
+    return objects_to_export
 
 def create_meshes(doc, objects_to_export):
     # Create temporary document to store meshes
