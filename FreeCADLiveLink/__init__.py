@@ -156,12 +156,12 @@ def receive_data():
                 import_call.method = True
                 import_call.objects = []
                 for obj in objects_data:
-                    import_call.objects.append(importedObject(obj["name"], obj["label"]))
+                    import_call.objects.append(importedObject(obj["object"]["name"], obj["object"]["label"]))
             elif method == "export":
                 import_call.method = False
                 import_call.objects = []
                 for obj in objects_data:
-                    import_call.objects.append(importedObject(obj["name"], obj["label"]))
+                    import_call.objects.append(importedObject(obj["object"]["name"], obj["object"]["label"]))
             else:
                 import_call.method = False
                 import_call.objects = []

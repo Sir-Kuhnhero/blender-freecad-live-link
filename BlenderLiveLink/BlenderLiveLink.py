@@ -13,6 +13,31 @@ from subprocess import Popen
 import shlex
 import Mesh
 import MeshPart
+from dataclasses import dataclass
+
+@dataclass
+class objectClass:
+    name: str
+    label: str
+    position:  App.Vector
+    rotation: App.Rotation
+    mesh: Mesh
+
+@dataclass
+class objectTreeClass:
+    object: objectClass
+    children: list['objectTreeClass']
+
+    def to_dict(self):
+        return {
+            "object": {
+                "name": self.object.name,
+                "label": self.object.label,
+                "position": [self.object.position.x, self.object.position.y, self.object.position.z],
+                "rotation": [self.object.rotation.Q[0], self.object.rotation.Q[1], self.object.rotation.Q[2], self.object.rotation.Q[3]],
+            },
+            "children": [child.to_dict() for child in self.children]
+        }
 
 
 def sync_or_export_to_blender(method):
@@ -23,25 +48,23 @@ def sync_or_export_to_blender(method):
             raise RuntimeError("No active document to export")
 
         selection = Gui.Selection.getSelectionEx()
-        objects_to_export = get_all_objects_to_export(doc, selection)
-
+        objects_to_export = [x.Object for x in selection] or [doc.ActiveObject]
 
         if not objects_to_export:
             raise RuntimeError("No objects selected to export")
 
-        meshes, mesh_data = create_meshes(doc, objects_to_export)
+        objectTrees = create_objectTree(doc, objects_to_export)
 
-        if meshes:
+        if objectTrees:
             temp_dir = TemporaryDirectory()
             os.makedirs(temp_dir.name, exist_ok=True)
-            object_path = os.path.join(temp_dir.name, f"{doc.Name}.obj")
-            Mesh.export(meshes, object_path)
+            object_path = export_meshes(doc, temp_dir, objectTrees)
 
             # create message as JSON
             message_data = {
                 "method": method,
                 "path": object_path,
-                "objects": [{"name": name, "label": label} for name, label in mesh_data]
+                "objects": [tree.to_dict() for tree in objectTrees]
             }
             message = json.dumps(message_data)
            
@@ -56,37 +79,40 @@ def sync_or_export_to_blender(method):
         for x in selection:
             Gui.Selection.addSelection(doc.Name, x.ObjectName)
 
-
-def get_all_objects_to_export(doc, selection):
-    """Get all objects to export from the current selection or document"""
-    if not selection:
-        return None
-
-    objects_to_export = [x.Object for x in selection] or [doc.ActiveObject]
-    
-
-    return objects_to_export
-
-def create_meshes(doc, objects_to_export):
+def create_objectTree(doc, objects_to_export) -> list[objectTreeClass]:
     # Create temporary document to store meshes
     tmp_doc = App.newDocument('meshes_to_export', temp=True)
-    meshes = []
-    mesh_data = []
+
+    objectTrees = []
+
     angular_deflection = 0.07  # Default angular deflection
 
     for o in objects_to_export:
+        # TODO recursifly add children to the object tree
         if o.TypeId == 'Mesh::Feature':
-            meshes.append(o)
-            mesh_data.append((o.Name, o.Label))
+            obj = objectClass(name=o.Name, label=o.Label, position=o.Placement.Base, rotation=o.Placement.Rotation, mesh=o)
         else:
             mesh = tmp_doc.addObject('Mesh::Feature', f'{doc.Name}_{o.Name}')
             mesh.Mesh = MeshPart.meshFromShape(
                 o.Shape, LinearDeflection=0.1, AngularDeflection=angular_deflection, Relative=False
             )
-            meshes.append(mesh)
-            mesh_data.append((o.Name, o.Label))
+            obj = objectClass(name=o.Name, label=o.Label, position=o.Placement.Base, rotation=o.Placement.Rotation, mesh=mesh)
+        
+        objectTrees.append(objectTreeClass(object=obj, children=[]))
 
-    return meshes, mesh_data
+    return objectTrees
+
+def export_meshes(doc, temp_dir, objectTrees):
+    mesh_objects = []
+    for tree in objectTrees:
+        if tree.object.mesh:
+            mesh_objects.append(tree.object.mesh)
+        if tree.children:
+            export_meshes(doc, temp_dir, tree.children)
+
+    object_path = os.path.join(temp_dir.name, f"{doc.Name}.obj")
+    Mesh.export(mesh_objects, object_path)
+    return object_path
 
 def send_message_to_blender(message):
     """Send a message to Blender via socket and return the response"""
