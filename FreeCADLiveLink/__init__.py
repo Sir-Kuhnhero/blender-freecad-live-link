@@ -65,8 +65,6 @@ def find_object_by_name(name, parent=None):
             end = obj.name.find(')')
             existing_name = obj.name[start+1:end]
 
-            print(f"Comparing existing name: {existing_name} with target name: {name}")
-            
             if existing_name == name:
                 return obj
         

@@ -63,7 +63,7 @@ def sync_or_export_to_blender(method):
 
         objectTrees = create_objectTree(doc, objects_to_export)
 
-        print_object_tree(objectTrees[0])
+        # print_object_tree(objectTrees[0])
 
         if objectTrees:
             temp_dir = TemporaryDirectory()
@@ -110,9 +110,6 @@ def create_objectTree(doc, objects_to_export) -> list[objectTreeClass]:
             obj.rotation = o.Placement.Rotation
             obj.mesh = o
         elif o.TypeId == 'PartDesign::Body':
-            App.Console.PrintMessage(f"Object {o.Name} is a body, converting to mesh.\n")
-            App.Console.PrintMessage(f"{o.TypeId}\n")
-            
             # Create mesh at origin by using shape without placement
             shape_copy = o.Shape.copy()
             shape_copy.Placement = App.Placement()
@@ -126,9 +123,6 @@ def create_objectTree(doc, objects_to_export) -> list[objectTreeClass]:
             obj.rotation = o.Placement.Rotation
             obj.mesh = mesh
         elif o.TypeId == 'App::Link':
-            App.Console.PrintMessage(f"Object {o.Name} is a link, processing linked object.\n")
-            App.Console.PrintMessage(f"{o.TypeId}\n")
-            
             # Create mesh at origin by using shape without placement
             shape_copy = o.Shape.copy()
             shape_copy.Placement = App.Placement()
@@ -142,24 +136,16 @@ def create_objectTree(doc, objects_to_export) -> list[objectTreeClass]:
             obj.rotation = o.Placement.Rotation
             obj.mesh = mesh
         elif o.TypeId == 'Assembly::AssemblyObject':
-            App.Console.PrintMessage(f"Object {o.Name} is an assembly, processing children.\n")
-            App.Console.PrintMessage(f"{o.TypeId}\n")
-            App.Console.PrintMessage(f"Children: {o.Group}\n")
-
             obj.rotation = o.Placement.Rotation
             obj.position = o.Placement.Base
             children = create_objectTree(doc, o.Group)
         elif o.TypeId == 'Assembly::AssemblyLink':
-            App.Console.PrintMessage(f"Object {o.Name} is an assembly link, processing linked object.\n")
-            App.Console.PrintMessage(f"{o.TypeId}\n")
-            App.Console.PrintMessage(f"Linked Object: {o.LinkedObject}\n")
-
             obj.rotation = o.Placement.Rotation
             obj.position = o.Placement.Base
             children = create_objectTree(doc, [o.LinkedObject])
         else:
             # Skip unsupported object types (like Joint Groups)
-            App.Console.PrintMessage(f"Skipping unsupported object type: {o.TypeId} ({o.Name})\n")
+            # App.Console.PrintMessage(f"Skipping unsupported object type: {o.TypeId} ({o.Name})\n")
             continue
 
         objectTrees.append(objectTreeClass(object=obj, children=children))
@@ -171,7 +157,6 @@ def export_meshes(doc, temp_dir, objectTrees):
 
     for tree in objectTrees:
         if tree.object.mesh:
-            App.Console.PrintMessage(f"Exporting mesh for object: {tree.object.name}\n")
             object_path = os.path.join(temp_dir.name, f"{tree.object.name}.obj")
             Mesh.export([tree.object.mesh], object_path)
             
