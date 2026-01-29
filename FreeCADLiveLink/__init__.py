@@ -102,8 +102,8 @@ def import_objectTree(tree: objectTreeClass, parent=None):
         if parent:
             bl_obj.parent = parent       
         else:
-            # Apply scale to parent objects
-            bl_obj.scale = (0.01, 0.01, 0.01)
+            # Apply scale to parent objects (FreeCAD uses mm, Blender uses m)
+            bl_obj.scale = (0.001, 0.001, 0.001)
             #bpy.ops.object.transform_apply(scale=True)
 
         # Determine which object to use for parenting children

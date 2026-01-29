@@ -44,7 +44,7 @@ class objectTreeClass:
 
 
 def print_object_tree(tree: objectTreeClass, indent=0):
-    App.Console.PrintMessage(' ' * indent + f"Object Name: {tree.object.name}, Label: {tree.object.label}, Position: {tree.object.position}, Rotation: {tree.object.rotation}, #children: {len(tree.children)}\n")
+    App.Console.PrintMessage(' ' * indent + f"Object Name: {tree.object.name}, Label: {tree.object.label}, Position: {tree.object.position}, Rotation: {tree.object.rotation}, Mesh: {tree.object.mesh}\n")
     for child in tree.children:
         print_object_tree(child, indent + 4)
 
@@ -63,7 +63,7 @@ def sync_or_export_to_blender(method):
 
         objectTrees = create_objectTree(doc, objects_to_export)
 
-        # print_object_tree(objectTrees[0])
+        print_object_tree(objectTrees[0])
 
         if objectTrees:
             temp_dir = TemporaryDirectory()
