@@ -7,15 +7,29 @@ import json
 from dataclasses import dataclass
 
 @dataclass
+class objectClass:
+    name: str = None
+    label: str = None
+    position: list = None
+    rotation: list = None
+    mesh: str = None
+
+@dataclass
+class objectTreeClass:
+    object: objectClass
+    children: list['objectTreeClass']
+
+@dataclass
 class importedObject:
-    name: str
-    label: str
+    name: str = None
+    label: str = None
     import_object = None
 
 class importCall:
     path = None
     method = None
-    objects: list[importedObject]
+    trees: list[objectTreeClass] = None 
+    objects: list[importedObject] ## Soon to be deprictated
     status = None
 
 
@@ -31,100 +45,209 @@ bl_info = {
 
 import_call = importCall()
 
-def find_object_by_name(name):
-    """Find an existing object in Blender by its name in parentheses"""
-    for obj in bpy.data.objects:
+def find_object_by_name(name, parent=None):
+    """Find an existing object in Blender by its name in parentheses, recursively searching the hierarchy"""
+    
+    # Determine which objects to search at this level
+    if parent is not None:
+        # Search within parent's direct children
+        objects_to_search = [child for child in bpy.data.objects if child.parent == parent]
+    else:
+        # Search only root-level objects (no parent)
+        objects_to_search = [obj for obj in bpy.data.objects if obj.parent is None]
+    
+    # Check each object at this level
+    for obj in objects_to_search:
         # Check if object name has the format name(name)
         if '(' in obj.name and ')' in obj.name:
             # Extract the name from parentheses
             start = obj.name.find('(')
             end = obj.name.find(')')
             existing_name = obj.name[start+1:end]
+
+            print(f"Comparing existing name: {existing_name} with target name: {name}")
+            
             if existing_name == name:
                 return obj
+        
+        # Recursively search this object's children
+        result = find_object_by_name(name, parent=obj)
+        if result:
+            return result
+    
     return None
 
-def import_obj():
+def import_objectTree(tree: objectTreeClass, parent=None):
     try:
         global import_call
 
         # Import the OBJ file
-        bpy.ops.wm.obj_import(filepath=import_call.path, forward_axis='Y', up_axis='Z')
-
-        # Get the newly imported objects (they are selected after import)
-        imported_objects = [obj for obj in bpy.data.objects if obj.select_get() == True]
-
-        # Apply scale to all imported objects
-        for obj in imported_objects:
-            obj.scale = (0.01, 0.01, 0.01)
-
-        for i in range(len(imported_objects)):
-            import_call.objects[i].import_object = imported_objects[i]
+        #bpy.ops.wm.obj_import(filepath=import_call.path, forward_axis='Y', up_axis='Z')
+        obj = tree.object
+        bl_obj = None
         
-        
-        bpy.ops.object.transform_apply(scale=True)
-        
-        if import_call.method:
-            # SYNC MODE: Use name(label) format and update existing objects
-            if import_call.objects:
-                for object in import_call.objects:
-                    new_name = f"{object.label}({object.name})"
-                    
-                    # Check if an object with this label already exists
-                    existing_obj = find_object_by_name(object.name)
-                    
-                    if existing_obj:
-                        # Sync: Replace the existing object's mesh data
-                        old_mesh = existing_obj.data
-                        new_mesh = object.import_object.data
-                        
-                        # Store existing materials
-                        old_materials = [slot.material for slot in existing_obj.material_slots]
-                        
-                        # Replace mesh data
-                        existing_obj.data = new_mesh
-                        existing_obj.name = new_name
-                        
-                        # Restore materials to the updated mesh
-                        if old_materials:
-                            for i, mat in enumerate(old_materials):
-                                if i < len(existing_obj.material_slots):
-                                    existing_obj.material_slots[i].material = mat
-                                else:
-                                    # Add new material slot if needed
-                                    existing_obj.data.materials.append(mat)
-                        
-                        # Remove the temporary imported object
-                        bpy.data.objects.remove(object.import_object, do_unlink=True)
-                        
-                        # Clean up the old mesh
-                        if old_mesh.users == 0:
-                            bpy.data.meshes.remove(old_mesh)
-                    else:
-                        # New object in sync mode: use name(label) format
-                        object.import_object.name = new_name
+        if obj.mesh == None:
+            # No mesh to import, create an empty object with sphere display
+            bl_obj = bpy.data.objects.new(obj.label or "Empty", None)
+            bl_obj.empty_display_type = 'SPHERE'
+            bpy.context.collection.objects.link(bl_obj)
         else:
+            # import mesh from tree.mesh using Blender 4.0+ operator
+            bpy.ops.wm.obj_import(filepath=obj.mesh, forward_axis='Y', up_axis='Z')
+            bl_obj = bpy.context.selected_objects[0]
+        
+        if obj.rotation:
+            bl_obj.rotation_mode = 'QUATERNION'
+            # Freecad uses (x, y, z, w) and Blender uses (w, x, y, z)
+            bl_obj.rotation_quaternion = (obj.rotation[3], obj.rotation[0], obj.rotation[1], obj.rotation[2])
+            #bpy.ops.object.transform_apply(rotation=True)
+        if obj.position:
+            bl_obj.location = (obj.position[0], obj.position[1], obj.position[2])
+
+        if parent:
+            bl_obj.parent = parent       
+        else:
+            # Apply scale to parent objects
+            bl_obj.scale = (0.01, 0.01, 0.01)
+            #bpy.ops.object.transform_apply(scale=True)
+
+        # Determine which object to use for parenting children
+        final_obj = bl_obj
+        
+        if import_call.method == "sync":
+            pass
+            # SYNC MODE: Use name(label) format and update existing objects
+            #if import_call.objects:
+            #    for object in import_call.objects:
+            #        new_name = f"{object.label}({object.name})"
+            #        
+            #        # Check if an object with this label already exists
+            #        existing_obj = find_object_by_name(object.name)
+            #        
+            #        if existing_obj:
+            #            # Sync: Replace the existing object's mesh data
+            #            old_mesh = existing_obj.data
+            #            new_mesh = object.import_object.data
+            #            
+            #            # Store existing materials
+            #            old_materials = [slot.material for slot in existing_obj.material_slots]
+            #            
+            #            # Replace mesh data
+            #            existing_obj.data = new_mesh
+            #            existing_obj.name = new_name
+            #            
+            #            # Restore materials to the updated mesh
+            #            if old_materials:
+            #                for i, mat in enumerate(old_materials):
+            #                    if i < len(existing_obj.material_slots):
+            #                        existing_obj.material_slots[i].material = mat
+            #                    else:
+            #                        # Add new material slot if needed
+            #                        existing_obj.data.materials.append(mat)
+            #            
+            #            # Remove the temporary imported object
+            #            bpy.data.objects.remove(object.import_object, do_unlink=True)
+            #            
+            #            # Clean up the old mesh
+            #            if old_mesh.users == 0:
+            #                bpy.data.meshes.remove(old_mesh)
+            #        else:
+            #            # New object in sync mode: use name(label) format
+            #            object.import_object.name = new_name
+            new_name = f"{obj.label}({obj.name})"
+            existing_obj = find_object_by_name(obj.name, parent=parent)
+            if existing_obj:
+                # Sync: Replace the existing object's mesh data
+                old_mesh = existing_obj.data
+                new_mesh = bl_obj.data
+
+                new_position = bl_obj.location
+                new_rotation = bl_obj.rotation_quaternion
+                existing_obj.location = new_position
+                existing_obj.rotation_mode = 'QUATERNION'
+                existing_obj.rotation_quaternion = new_rotation
+                
+                # Only replace mesh data if both objects have meshes
+                if old_mesh is not None and new_mesh is not None:
+                    # Store existing materials
+                    old_materials = [slot.material for slot in existing_obj.material_slots]
+                    
+                    # Replace mesh data
+                    existing_obj.data = new_mesh
+                    existing_obj.name = new_name
+                    
+                    # Restore materials to the updated mesh
+                    if old_materials:
+                        for i, mat in enumerate(old_materials):
+                            if i < len(existing_obj.material_slots):
+                                existing_obj.material_slots[i].material = mat
+                            else:
+                                # Add new material slot if needed
+                                existing_obj.data.materials.append(mat)
+                    
+                    # Clean up the old mesh
+                    if old_mesh.users == 0:
+                        bpy.data.meshes.remove(old_mesh)
+                elif old_mesh is None and new_mesh is None:
+                    # Both are empties, just update the name
+                    existing_obj.name = new_name
+                
+                # Remove the temporary imported object
+                bpy.data.objects.remove(bl_obj, do_unlink=True)
+                
+                # Use the existing object for parenting children
+                final_obj = existing_obj
+            else:
+                # New object in sync mode: use name(label) format
+                bl_obj.name = new_name
+                final_obj = bl_obj
+        elif import_call.method == "export":
+            bl_obj.name = obj.label or "ExportedObject"
+            final_obj = bl_obj
+
+
+
             # EXPORT MODE: Use only label as name (makes them not sync targets)
-            if import_call.objects:
-                for object in import_call.objects:
-                    object.import_object.name = object.label
-                        
+            #if import_call.objects:
+            #    for object in import_call.objects:
+            #        object.import_object.name = object.label
+
+        for child in tree.children:
+            import_objectTree(child, parent=final_obj)
+
     except Exception as e:
-        print(f"Import error: {e}")
+        print(f"Import error: {e}") 
 
 def obj_data_monitor():
     global import_call
 
     if import_call.path != None:
         try:
-            import_obj()
+            for tree in import_call.trees:
+                import_objectTree(tree)
             import_call.path = None
-            import_call.objects = None
+            import_call.trees = None
             import_call.status = 'SUCCESS'    
         except Exception as e:
             print(str(e))
             import_call.status = 'FAILURE'    
     return 1.0
+
+def create_objectTree_from_dict(data) -> objectTreeClass:
+    obj_data = data.get("object", {})
+    obj = objectClass(
+        name=obj_data.get("name"),
+        label=obj_data.get("label"),
+        position=obj_data.get("position"),
+        rotation=obj_data.get("rotation"),
+        mesh=obj_data.get("mesh_path"),
+    )
+    # TODO set mesh to the mesh name in the temp directory
+
+    children_data = data.get("children", [])
+    children = [create_objectTree_from_dict(child) for child in children_data]
+
+    return objectTreeClass(object=obj, children=children)
 
 def receive_data():
 
@@ -147,7 +270,21 @@ def receive_data():
         connection, client_address = server_socket.accept()
         print("Connected with FreeCAD instance:", client_address)
 
-        data = connection.recv(1024).decode()
+        # Receive data in chunks until complete
+        data_chunks = []
+        while True:
+            chunk = connection.recv(4096)
+            if not chunk:
+                break
+            data_chunks.append(chunk)
+            # Check if we received a complete JSON message
+            try:
+                json.loads(b''.join(data_chunks).decode())
+                break  # Valid JSON received, stop reading
+            except json.JSONDecodeError:
+                continue  # Incomplete JSON, keep reading
+        
+        data = b''.join(data_chunks).decode()
         print(f"Received data: {data}")
 
         # Parse the JSON data
@@ -158,20 +295,19 @@ def receive_data():
             objects_data = message_data.get("objects", [])
 
             if method == "sync":
-                import_call.method = True
-                import_call.objects = []
-                for obj in objects_data:
-                    obj_data = obj.get("object", obj)  # Handle nested structure
-                    import_call.objects.append(importedObject(obj_data["name"], obj_data["label"]))
+                import_call.method = "sync"
+                import_call.trees = []
+                for obj_tree in objects_data:
+                    import_call.trees.append(create_objectTree_from_dict(obj_tree))
             elif method == "export":
-                import_call.method = False
-                import_call.objects = []
-                for obj in objects_data:
-                    obj_data = obj.get("object", obj)  # Handle nested structure
-                    import_call.objects.append(importedObject(obj_data["name"], obj_data["label"]))
+                import_call.method = "export"
+                import_call.trees = []
+                for obj_tree in objects_data:
+                    import_call.trees.append(create_objectTree_from_dict(obj_tree))
+                    print(f"Object Tree: {obj_tree}")
             else:
-                import_call.method = False
-                import_call.objects = []
+                import_call.method = None
+                import_call.trees = []
         except json.JSONDecodeError as e:
             print(f"JSON decode error: {e}")
             raise ValueError("Invalid JSON format received")

@@ -17,11 +17,12 @@ from dataclasses import dataclass
 
 @dataclass
 class objectClass:
-    name: str
-    label: str
-    position:  App.Vector
-    rotation: App.Rotation
-    mesh: Mesh
+    name: str = None
+    label: str = None
+    position:  App.Vector = None
+    rotation: App.Rotation = None
+    mesh: Mesh = None
+    mesh_path: str = None
 
 @dataclass
 class objectTreeClass:
@@ -33,12 +34,19 @@ class objectTreeClass:
             "object": {
                 "name": self.object.name,
                 "label": self.object.label,
-                "position": [self.object.position.x, self.object.position.y, self.object.position.z],
-                "rotation": [self.object.rotation.Q[0], self.object.rotation.Q[1], self.object.rotation.Q[2], self.object.rotation.Q[3]],
+                "position": [self.object.position.x, self.object.position.y, self.object.position.z] if self.object.position else [0, 0, 0],
+                "rotation": [self.object.rotation.Q[0], self.object.rotation.Q[1], self.object.rotation.Q[2], self.object.rotation.Q[3]] if self.object.rotation else [1, 0, 0, 0],
+                "mesh": self.object.mesh.Name if self.object.mesh else None,
+                "mesh_path": self.object.mesh_path
             },
             "children": [child.to_dict() for child in self.children]
         }
 
+
+def print_object_tree(tree: objectTreeClass, indent=0):
+    App.Console.PrintMessage(' ' * indent + f"Object Name: {tree.object.name}, Label: {tree.object.label}, Position: {tree.object.position}, Rotation: {tree.object.rotation}, #children: {len(tree.children)}\n")
+    for child in tree.children:
+        print_object_tree(child, indent + 4)
 
 def sync_or_export_to_blender(method):
     """Export objects to Blender as new bodies (using only label as name)"""
@@ -55,15 +63,17 @@ def sync_or_export_to_blender(method):
 
         objectTrees = create_objectTree(doc, objects_to_export)
 
+        print_object_tree(objectTrees[0])
+
         if objectTrees:
             temp_dir = TemporaryDirectory()
             os.makedirs(temp_dir.name, exist_ok=True)
-            object_path = export_meshes(doc, temp_dir, objectTrees)
+            objectTrees = export_meshes(doc, temp_dir, objectTrees)
 
             # create message as JSON
             message_data = {
                 "method": method,
-                "path": object_path,
+                "path": "Soon to be deprecated",
                 "objects": [tree.to_dict() for tree in objectTrees]
             }
             message = json.dumps(message_data)
@@ -88,31 +98,90 @@ def create_objectTree(doc, objects_to_export) -> list[objectTreeClass]:
     angular_deflection = 0.07  # Default angular deflection
 
     for o in objects_to_export:
-        # TODO recursifly add children to the object tree
+        obj = objectClass()
+        children = []
+        
+        # universal properties
+        obj.name = o.Name
+        obj.label = o.Label
+        
         if o.TypeId == 'Mesh::Feature':
-            obj = objectClass(name=o.Name, label=o.Label, position=o.Placement.Base, rotation=o.Placement.Rotation, mesh=o)
-        else:
+            obj.position = o.Placement.Base
+            obj.rotation = o.Placement.Rotation
+            obj.mesh = o
+        elif o.TypeId == 'PartDesign::Body':
+            App.Console.PrintMessage(f"Object {o.Name} is a body, converting to mesh.\n")
+            App.Console.PrintMessage(f"{o.TypeId}\n")
+            
+            # Create mesh at origin by using shape without placement
+            shape_copy = o.Shape.copy()
+            shape_copy.Placement = App.Placement()
+            
             mesh = tmp_doc.addObject('Mesh::Feature', f'{doc.Name}_{o.Name}')
             mesh.Mesh = MeshPart.meshFromShape(
-                o.Shape, LinearDeflection=0.1, AngularDeflection=angular_deflection, Relative=False
+                shape_copy, LinearDeflection=0.1, AngularDeflection=angular_deflection, Relative=False
             )
-            obj = objectClass(name=o.Name, label=o.Label, position=o.Placement.Base, rotation=o.Placement.Rotation, mesh=mesh)
-        
-        objectTrees.append(objectTreeClass(object=obj, children=[]))
+
+            obj.position = o.Placement.Base
+            obj.rotation = o.Placement.Rotation
+            obj.mesh = mesh
+        elif o.TypeId == 'App::Link':
+            App.Console.PrintMessage(f"Object {o.Name} is a link, processing linked object.\n")
+            App.Console.PrintMessage(f"{o.TypeId}\n")
+            
+            # Create mesh at origin by using shape without placement
+            shape_copy = o.Shape.copy()
+            shape_copy.Placement = App.Placement()
+            
+            mesh = tmp_doc.addObject('Mesh::Feature', f'{doc.Name}_{o.Name}')
+            mesh.Mesh = MeshPart.meshFromShape(
+                shape_copy, LinearDeflection=0.1, AngularDeflection=angular_deflection, Relative=False
+            )
+
+            obj.position = o.Placement.Base
+            obj.rotation = o.Placement.Rotation
+            obj.mesh = mesh
+        elif o.TypeId == 'Assembly::AssemblyObject':
+            App.Console.PrintMessage(f"Object {o.Name} is an assembly, processing children.\n")
+            App.Console.PrintMessage(f"{o.TypeId}\n")
+            App.Console.PrintMessage(f"Children: {o.Group}\n")
+
+            obj.rotation = o.Placement.Rotation
+            obj.position = o.Placement.Base
+            children = create_objectTree(doc, o.Group)
+        elif o.TypeId == 'Assembly::AssemblyLink':
+            App.Console.PrintMessage(f"Object {o.Name} is an assembly link, processing linked object.\n")
+            App.Console.PrintMessage(f"{o.TypeId}\n")
+            App.Console.PrintMessage(f"Linked Object: {o.LinkedObject}\n")
+
+            obj.rotation = o.Placement.Rotation
+            obj.position = o.Placement.Base
+            children = create_objectTree(doc, [o.LinkedObject])
+        else:
+            # Skip unsupported object types (like Joint Groups)
+            App.Console.PrintMessage(f"Skipping unsupported object type: {o.TypeId} ({o.Name})\n")
+            continue
+
+        objectTrees.append(objectTreeClass(object=obj, children=children))
 
     return objectTrees
 
 def export_meshes(doc, temp_dir, objectTrees):
-    mesh_objects = []
+    new_trees: list[objectTreeClass] = []
+
     for tree in objectTrees:
         if tree.object.mesh:
-            mesh_objects.append(tree.object.mesh)
+            App.Console.PrintMessage(f"Exporting mesh for object: {tree.object.name}\n")
+            object_path = os.path.join(temp_dir.name, f"{tree.object.name}.obj")
+            Mesh.export([tree.object.mesh], object_path)
+            
+            tree.object.mesh_path = object_path
+            new_trees.append(tree)
         if tree.children:
-            export_meshes(doc, temp_dir, tree.children)
-
-    object_path = os.path.join(temp_dir.name, f"{doc.Name}.obj")
-    Mesh.export(mesh_objects, object_path)
-    return object_path
+            tree.children = export_meshes(doc, temp_dir, tree.children)
+            new_trees.append(tree)
+    
+    return new_trees
 
 def send_message_to_blender(message):
     """Send a message to Blender via socket and return the response"""
