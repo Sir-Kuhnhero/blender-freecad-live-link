@@ -131,9 +131,14 @@ def receive_data():
     global import_call
 
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    #server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server_address = ('localhost', 25000)
-    server_socket.bind(server_address)
+    
+    try:
+        server_socket.bind(server_address)
+    except OSError as e:
+        print(f"Failed to bind socket: {e}. Port may already be in use.")
+        return
 
     while True:
         server_socket.listen(5)
@@ -156,12 +161,14 @@ def receive_data():
                 import_call.method = True
                 import_call.objects = []
                 for obj in objects_data:
-                    import_call.objects.append(importedObject(obj["object"]["name"], obj["object"]["label"]))
+                    obj_data = obj.get("object", obj)  # Handle nested structure
+                    import_call.objects.append(importedObject(obj_data["name"], obj_data["label"]))
             elif method == "export":
                 import_call.method = False
                 import_call.objects = []
                 for obj in objects_data:
-                    import_call.objects.append(importedObject(obj["object"]["name"], obj["object"]["label"]))
+                    obj_data = obj.get("object", obj)  # Handle nested structure
+                    import_call.objects.append(importedObject(obj_data["name"], obj_data["label"]))
             else:
                 import_call.method = False
                 import_call.objects = []
@@ -191,10 +198,13 @@ def cleanup_threads():
         time.sleep(2)
         for thread in threading.enumerate():
             if thread.getName() == "MainThread" and thread.is_alive() == False:
-                cleanup_socket = socket.socket()
-                cleanup_socket.connect(('localhost', 25000))
-                cleanup_socket.send(b"Quit Blender!")
-                cleanup_socket.close()
+                try:
+                    cleanup_socket = socket.socket()
+                    cleanup_socket.connect(('localhost', 25000))
+                    cleanup_socket.send(b"Quit Blender!")
+                    cleanup_socket.close()
+                except (ConnectionRefusedError, OSError) as e:
+                    print(f"Cleanup connection failed: {e}")
                 threads_cleaned = True
                 break
 
